@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RoverAI · Live Vision</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1015;--panel:#121a22;--line:#263541;--muted:#93a4b4;--accent:#54e6a5;--pink:#ff38c7}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:#edf4f8;font:14px/1.4 Inter,Segoe UI,Arial,sans-serif}
+    .app{max-width:1500px;margin:auto;padding:18px;display:grid;grid-template-columns:290px minmax(0,1fr);gap:16px;min-height:100vh}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+    h1{font-size:18px;margin:0 0 5px;letter-spacing:.04em}h2{font-size:13px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.12em;margin:0 0 13px}
+    .sub{color:var(--muted);font-size:12px}.status{display:flex;align-items:center;gap:8px;margin:14px 0 18px}
+    .dot{width:8px;height:8px;border-radius:50%;background:#e4a34e}.dot.on{background:var(--accent);box-shadow:0 0 10px #54e6a566}
+    .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 22px}.drive{height:58px;border:1px solid #344550;border-radius:10px;background:#1a2630;color:#f3f8fb;font-size:24px;touch-action:none;user-select:none}
+    .drive:active{background:#2b3c47}.drive.stop{font-size:12px;color:#ff9292}.field{margin:16px 0}.field label{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-bottom:8px}
+    input[type=range],select{width:100%;accent-color:var(--accent)}select{background:#1a2630;color:#f3f8fb;border:1px solid #344550;padding:10px;border-radius:8px}
+    .main{display:flex;flex-direction:column;gap:16px;min-width:0}.top{display:flex;justify-content:space-between;align-items:center;gap:12px}.pill{border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--muted);font-size:11px}
+    .feed{position:relative;background:#050709;border:1px solid var(--line);border-radius:14px;overflow:hidden;min-height:300px;display:flex;align-items:center;justify-content:center;aspect-ratio:4/3}
+    #video{width:100%;height:100%;object-fit:contain;position:absolute;inset:0}.feed-placeholder{color:var(--muted);text-align:center;padding:20px}
+    .feed-hud{position:absolute;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}.hud-label{background:#07100dd9;border:1px solid #2d5545;border-radius:7px;padding:6px 9px;font-size:11px;color:var(--accent)}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.stat{background:#0d141b;border:1px solid var(--line);border-radius:10px;padding:12px}.stat span{display:block;color:var(--muted);font-size:11px;margin-bottom:5px}.stat strong{font-size:21px;font-weight:650}
+    .lower{display:grid;grid-template-columns:1fr 1fr;gap:16px}.btn{border:0;border-radius:9px;padding:11px 14px;background:var(--accent);color:#07150f;font-weight:700;cursor:pointer}.btn:disabled{opacity:.4;cursor:not-allowed}
+    .legend{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:11px;margin-top:12px}.swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;background:var(--pink)}.swatch.other{background:#00dcff}
+    #message{color:var(--muted);font-size:12px;margin-top:10px;min-height:18px}.capture-list{color:var(--muted);font-size:12px;max-height:160px;overflow:auto}
+    @media(max-width:850px){.app{grid-template-columns:1fr;padding:10px}.main{order:1}.sidebar{order:2}.feed{min-height:220px}.stats{grid-template-columns:repeat(2,1fr)}.lower{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="panel sidebar">
+    <h1>ROVER<span style="color:var(--accent)">AI</span></h1>
+    <div class="sub">Remote reconnaissance · Control station</div>
+    <div class="status"><span id="connectionDot" class="dot"></span><span id="connectionText">Connecting to rover…</span></div>
+    <h2>Drive controls</h2>
+    <div class="pad">
+      <div></div><button class="drive" data-move="1" aria-label="Forward">↑</button><div></div>
+      <button class="drive" data-move="3" aria-label="Left">←</button><button class="drive stop" id="stop">STOP</button><button class="drive" data-move="4" aria-label="Right">→</button>
+      <div></div><button class="drive" data-move="2" aria-label="Reverse">↓</button><div></div>
+    </div>
+    <h2>Camera & rover</h2>
+    <div class="field"><label for="camMode">Camera mode</label><select id="camMode"><option value="0">Default · 240×240</option><option value="1">High quality · 320×240</option><option value="2">Capture · 640×480</option></select></div>
+    <div class="field"><label for="speed">Motor speed <b id="speedVal">150</b></label><input id="speed" type="range" min="0" max="255" value="150"></div>
+    <div class="field"><label for="light">Torch intensity <b id="lightVal">0</b></label><input id="light" type="range" min="0" max="255" value="0"></div>
+    <div class="sub">Keep the rover lifted during the first control test. Release a direction button to stop.</div>
+  </aside>
+
+  <main class="main">
+    <section class="panel">
+      <div class="top"><div><h1>LIVE AI VISION</h1><div class="sub">YOLO detections are drawn over the camera stream</div></div><span class="pill" id="modelStatus">MODEL STARTING</span></div>
+      <div class="feed" style="margin-top:14px">
+        <img id="video" alt="Annotated live camera feed" hidden>
+        <div id="placeholder" class="feed-placeholder">Waiting for the ESP32 camera stream…</div>
+        <div class="feed-hud"><span class="hud-label">● LIVE INFERENCE</span><span class="hud-label" id="frameTime">NO FRAME</span></div>
+      </div>
+      <div class="stats" style="margin-top:12px">
+        <div class="stat"><span>People detected</span><strong id="people">—</strong></div>
+        <div class="stat"><span>Inference time</span><strong id="inference">—</strong></div>
+        <div class="stat"><span>Processing FPS</span><strong id="fps">—</strong></div>
+        <div class="stat"><span>Objects detected</span><strong id="objects">—</strong></div>
+      </div>
+      <div class="legend"><span><i class="swatch"></i>Person</span><span><i class="swatch other"></i>Other YOLO classes</span><span>Labels include confidence</span></div>
+      <div id="message"></div>
+    </section>
+    <div class="lower">
+      <section class="panel"><h2>Capture scene</h2><div class="sub" style="margin-bottom:12px">Save the original image, annotated image, timestamp, and detections together.</div><button class="btn" id="captureBtn" disabled>Capture current frame</button><div id="captureMessage" class="sub" style="margin-top:10px"></div></section>
+      <section class="panel"><h2>Recent captures</h2><div id="captures" class="capture-list">No captures in this session yet.</div><div class="sub" style="margin-top:10px">AI Search will be added after live detection and capture are verified.</div></section>
+    </div>
+  </main>
+</div>
+<script>
+let videoSocket, controlSocket, lastCapture = null;
+const $ = id => document.getElementById(id);
+function connectVideo(){
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  videoSocket = new WebSocket(`${protocol}//${location.host}/ws/video`);
+  videoSocket.binaryType = "blob";
+  videoSocket.onmessage = event => {
+    const url = URL.createObjectURL(event.data);
+    const img = $("video");
+    const old = img.dataset.url;
+    img.src = url; img.dataset.url = url; img.hidden = false; $("placeholder").hidden = true;
+    img.onload = () => { if(old) URL.revokeObjectURL(old); };
+    $("captureBtn").disabled = false;
+  };
+  videoSocket.onclose = () => setTimeout(connectVideo, 1500);
+}
+function connectControl(){
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  controlSocket = new WebSocket(`${protocol}//${location.host}/ws/control`);
+  controlSocket.onopen = () => {
+    send("Speed", $("speed").value); send("Light", $("light").value); send("CamMode", $("camMode").value);
+  };
+  controlSocket.onclose = () => { setTimeout(connectControl, 1500); stopCar(); };
+}
+function send(key,value){if(controlSocket && controlSocket.readyState===WebSocket.OPEN) controlSocket.send(`${key},${value}`)}
+function stopCar(){send("MoveCar",0)}
+document.querySelectorAll("[data-move]").forEach(button=>{
+  const start = e => {e.preventDefault(); send("MoveCar",button.dataset.move)};
+  const end = e => {e.preventDefault(); stopCar()};
+  button.addEventListener("pointerdown",start);
+  button.addEventListener("pointerup",end);
+  button.addEventListener("pointercancel",end);
+  button.addEventListener("pointerleave",e=>{if(e.buttons) end(e)});
+});
+$("stop").addEventListener("click",stopCar);
+$("speed").addEventListener("input",e=>{$("speedVal").textContent=e.target.value;send("Speed",e.target.value)});
+$("light").addEventListener("input",e=>{$("lightVal").textContent=e.target.value;send("Light",e.target.value)});
+$("camMode").addEventListener("change",e=>send("CamMode",e.target.value));
+async function pollStatus(){
+  try{
+    const res=await fetch("/api/status"); const s=await res.json();
+    $("connectionDot").classList.toggle("on",!!s.connected);
+    $("connectionText").textContent=s.connected?"ESP32 camera connected":"Waiting for ESP32 camera";
+    $("modelStatus").textContent=s.error?"CHECK CONNECTION":(s.connected?"MODEL ACTIVE":"WAITING FOR CAMERA");
+    $("people").textContent=s.people ?? "—"; $("inference").textContent=s.inference_ms==null?"—":`${s.inference_ms} ms`;
+    $("fps").textContent=s.fps==null?"—":s.fps; $("objects").textContent=s.detections?.length ?? "—";
+    $("frameTime").textContent=s.last_frame_time || "NO FRAME";
+    $("message").textContent=s.error || "";
+  }catch(e){$("message").textContent="Cannot reach local Python service."}
+}
+$("captureBtn").addEventListener("click",async()=>{
+  $("captureBtn").disabled=true; $("captureMessage").textContent="Saving current processed frame…";
+  try{
+    const res=await fetch("/api/capture",{method:"POST"}); const data=await res.json();
+    if(!res.ok) throw new Error(data.error || "Capture failed");
+    lastCapture=data; $("captureMessage").textContent=`Saved at ${data.captured_at}`;
+    const line=document.createElement("div"); line.textContent=`${data.captured_at} · ${data.metadata}`;
+    if($("captures").textContent.includes("No captures")) $("captures").textContent="";
+    $("captures").prepend(line);
+  }catch(e){$("captureMessage").textContent=e.message}
+  finally{$("captureBtn").disabled=false}
+});
+connectVideo(); connectControl(); pollStatus(); setInterval(pollStatus,1000);
+window.addEventListener("blur",stopCar);
+</script>
+</body>
+</html>
